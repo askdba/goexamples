@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -76,21 +77,48 @@ func insertLoop(dsn string, index int) error {
 		return err
 	}
 
-	// first insert a user record
+	// get the actual Team ID
+	teamID := ""
+	teamName := ""
+	if rand.Int63n(5) == 0 { // create a new team
+		teamID = randData(10)
+		teamName = randData(10)
+	} else { // use an old team
+		rows, err := db.Query("select team_id, name from team order by rand() limit 1");
+		if err != nil {
+			fmt.Printf("Error selecting random user id: %v\n", err)
+			return err
+		}
+		if rows.Next() {
+			err := rows.Scan(&teamID, &teamName)
+			if err != nil {
+				return err
+			}
+		} else {
+			teamID = randData(10)
+			teamName = randData(10)
+		}
+	}
 
+	// first insert a user record
 	q, err := db.Prepare(insUserQuery)
 	if err != nil {
 		fmt.Printf("Error preparing query: %v\n", insUserQuery)
 		return err
 	}
 
-	email := randData(18) + "@mydomain.com"
-	teamID := randData(11)
+	seed := time.Now().Nanosecond()
+	email := randData(18) + "_" + strconv.Itoa(seed) + "@mydomain.com"
 	name := randData(25)
 
-	if _, err := q.Exec(teamID,name,email);
-		err != nil {
+	res, err := q.Exec(teamID,name,email)
+	if err != nil {
 		fmt.Printf("Error inserting user data: %v\n", err)
+		return err
+	}
+
+	userID, err := res.LastInsertId()
+	if err != nil {
 		return err
 	}
 
@@ -103,32 +131,10 @@ func insertLoop(dsn string, index int) error {
 		return err
 	}
 
-	q, err = db.Prepare(randUserQuery)
-	if err != nil {
-		fmt.Printf("Error preparing query: %v\n", randUserQuery)
+	if _, err := q.Exec(teamID, userID, teamName)
+	err != nil {
+		fmt.Printf("Error inserting team data: %v\n", err)
 		return err
-	}
-	//for i := index * rowsPer; i < (index+1)*rowsPer; i++ {
-		// generate a random id between 1 & 20
-		// TODO: this should be same as numThreads
-		// teamID = random 11-char string
-	time.Sleep(time.Second)
-		randusrId,err := q.Query(randUserQuery);
-		fmt.Printf("User id=%v\n", randusrId)
-		if err != nil {
-			fmt.Printf("Error selecting random user id: %v\n", err)
-			return err
-		}
-    for randusrId.Next() {
-		teamID := randData(11)
-		fmt.Printf("Inserting new team for team_id=%v\n", teamID)
-
-		if _, err := q.Exec(teamID,randusrId,name)
-		err != nil {
-			fmt.Printf("Error inserting team data: %v\n", err)
-			return err
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	return nil
 }
