@@ -7,9 +7,10 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
-	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -18,6 +19,7 @@ var insUserQuery = "INSERT into user (team_id,name,email) values (?,?,?)"
 var insTeamQuery = "insert into team (team_id,user_id, name) values (?,?,?);"
 var selQuery = "select email from user where user_id=?"
 var randUserQuery = "select user_id from user order by rand() limit 1;"
+var wipeTables = "truncate table user;"
 var rowsPer = 50000
 
 func main() {
@@ -26,7 +28,7 @@ func main() {
 	mode := flag.String("mode", "read", "read/write")
 
 	flag.Parse()
-	if *mode != "read" && *mode != "write" {
+	if *mode != "read" && *mode != "write" && *mode != "wipe" {
 		fmt.Printf("Unknown mode: %v\n", *mode)
 		os.Exit(1)
 	}
@@ -39,6 +41,12 @@ func main() {
 	if !ok {
 		fmt.Println("DATABASE_URL not specified")
 		os.Exit(2)
+	}
+	str := *mode
+	if strings.Contains(str, *mode) {
+		fmt.Printf("Truncating tables...\n")
+		go wipeFunc(dsn)
+		os.Exit(0)
 	}
 
 	for i := 0; i < *numThreads; i++ {
@@ -96,7 +104,7 @@ func insertLoop(dsn string, index int) error {
 			}
 		} else {
 			teamID = randData(10)
-			teamName = randData(10)
+			teamName = randData(11)
 		}
 	}
 
@@ -165,6 +173,29 @@ func selectLoop(dsn string, index int) error {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func wipeFunc(dsn string) error {
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		fmt.Printf("error connecting to db: %v\n", dsn)
+		return err
+	}
+
+	if err := db.Ping(); err != nil {
+		return err
+	}
+
+	q, err := db.Prepare(wipeTables)
+	if err != nil {
+		fmt.Printf("error preparing query: %v\n", wipeTables)
+		return err
+	}
+	if _, err := q.Exec(q); err != nil {
+			fmt.Printf("error wiping data: %v", err)
+			return err
+	}
+	return nil
 }
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
